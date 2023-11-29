@@ -1,0 +1,165 @@
+---
+title: "Lab_14"
+author: "Kendrick Nguyen"
+format: pdf
+editor: visual
+toc: True
+---
+
+## 
+
+```{r}
+#| message: false 
+#| warning: false
+library(DESeq2)
+```
+
+Load In the Data
+
+```{r}
+metadata<- read.csv("GSE37704_metadata.csv", row.names = 1)
+head(metadata)
+```
+
+```{r}
+#import countdata 
+
+countData <- read.csv("GSE37704_featurecounts.csv", row.names = 1) 
+head(countData)
+countData<- as.matrix(countData[,-1])
+head(countData)
+```
+
+```{r}
+# Filter count data where you have 0 read count across all samples.
+countData  <-  countData[(rowSums(countData))!=0, ]
+head(countData)
+```
+
+```{r}
+dds = DESeqDataSetFromMatrix(countData=countData,
+                              colData = metadata,
+                             design=~condition)
+dds = DESeq(dds)
+dds
+```
+
+```{r}
+res = results(dds)
+summary(res)
+```
+
+```{r}
+plot( res$log2FoldChange, -log(res$padj) )
+```
+
+```{r}
+plot( res$log2FoldChange,  -log(res$padj), 
+ ylab="-Log(P-value)", xlab="Log2(FoldChange)")
+
+# Add some cut-off lines
+abline(v=c(-2,2), col="darkgray", lty=2)
+abline(h=-log(0.05), col="darkgray", lty=2)
+
+```
+
+```{r}
+mycols <- rep("gray", nrow(res))
+mycols[ abs(res$log2FoldChange) > 2 ]  <- "red" 
+
+inds <- (res$padj < 0.01) & (abs(res$log2FoldChange) > 2 )
+mycols[ inds ] <- "blue"
+
+# Volcano plot with custom colors 
+plot( res$log2FoldChange,  -log(res$padj), 
+ col=mycols, ylab="-Log(P-value)", xlab="Log2(FoldChange)" )
+
+# Cut-off lines
+abline(v=c(-2,2), col="gray", lty=2)
+abline(h=-log(0.1), col="gray", lty=2)
+```
+
+```{r}
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+
+columns(org.Hs.eg.db)
+
+res$symbol = mapIds(org.Hs.eg.db,
+                    keys=row.names(countData), 
+                    keytype="ENSEMBL",
+                    column="SYMBOL",
+                    multiVals="first")
+
+res$entrezid = mapIds(org.Hs.eg.db,
+                    keys=row.names(countData),
+                    keytype="ENSEMBL",
+                    column="ENTREZID",
+                    multiVals="first")
+
+res$name =   mapIds(org.Hs.eg.db,
+                    keys=row.names(countData),
+                    keytype="ENSEMBL",
+                    column="GENENAME",
+                    multiVals="first")
+
+head(res, 10)
+```
+
+```{r}
+#| message: false
+library(gage)
+library(gageData)
+library(pathview)
+```
+
+The `gag()` function wants a vector of importance in our case here it will be the fold-change values with associated entrez gene names
+
+```{r}
+foldchange<- res$log2FoldChange
+names(foldchange)<- res$entrezid
+```
+
+```{r}
+data(kegg.sets.hs)
+
+keggres= gage(foldchange, gsets =kegg.sets.hs )
+```
+
+```{r}
+head(keggres$less)
+```
+
+hsa04110 cell cycle
+
+```{r}
+pathview(gene.data = foldchange, pathway.id = "hsa04110")
+```
+
+\![\](hsa04110.png)
+
+Picture wasnt showing up, Could not get Pathview to work and only was able to get this resolved at the end of class after an hour of troubleshooting
+
+```{r}
+data(go.sets.hs)
+data(go.subs.hs)
+
+# Focus on Biological Process subset of GO
+gobpsets = go.sets.hs[go.subs.hs$BP]
+
+gobpres = gage(foldchange, gsets=gobpsets, same.dir=TRUE)
+
+lapply(gobpres, head)
+```
+
+```{}
+```
+
+```{r}
+sig_genes <- res[res$padj <= 0.05 & !is.na(res$padj), "symbol"]
+print(paste("Total number of significant genes:", length(sig_genes)))
+```
+
+```{r}
+write.table(sig_genes, file="significant_genes.txt", row.names=FALSE, col.names=FALSE, quote=FALSE)
+```
